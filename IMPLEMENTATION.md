@@ -8,7 +8,7 @@ OwlKnowledge is an MCP server that keeps source references as durable material a
 OWL_KNOWLEDGE_DATA_DIR=.owlknowledge ./bin/owlknowledge-mcp
 ```
 
-The process speaks newline-delimited JSON-RPC over stdin/stdout. Its only product interface is MCP. The launcher is POSIX `sh`; the server is POSIX `awk` and has no Python, jq, SQLite, HTTP server, or MCP SDK dependency.
+The process speaks newline-delimited JSON-RPC over stdin/stdout. Notifications without an id are executed without emitting a response. Its only product interface is MCP. The launcher is POSIX `sh`; the server is POSIX `awk` and has no Python, jq, SQLite, HTTP server, or MCP SDK dependency.
 
 The data directory contains JSON Lines files:
 
