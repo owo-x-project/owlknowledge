@@ -202,6 +202,13 @@ function valid_json(s) {
     return JSON_OK && JSON_POS > length(s)
 }
 
+function valid_rpc_id(raw) {
+    if (raw == "null") return 1
+    if (substr(raw, 1, 1) == "\"") return valid_json(raw)
+    if (raw !~ /^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$/) return 0
+    return valid_json(raw)
+}
+
 function raw_kind(raw, i, c) {
     i = ws(raw, 1); c = substr(raw, i, 1)
     if (c == "{") return "object"
@@ -382,7 +389,11 @@ function edge_summary(id) {
 }
 
 function handle_request(line, method, id_present, params) {
+    if (!valid_json(line)) { ID_RAW = "null"; rpc_error(-32700, "parse error"); return }
+    object_get(line, "jsonrpc")
+    if (!GET_PRESENT || GET_RAW != "\"2.0\"") { ID_RAW = "null"; rpc_error(-32600, "request requires jsonrpc 2.0"); return }
     ID_RAW = "null"; object_get(line, "id"); id_present = GET_PRESENT; if (id_present) ID_RAW = GET_RAW
+    if (id_present && !valid_rpc_id(ID_RAW)) { ID_RAW = "null"; rpc_error(-32600, "request id must be a string, number, or null"); return }
     object_get(line, "method")
     if (!GET_PRESENT || substr(GET_RAW, 1, 1) != "\"") { if (id_present) rpc_error(-32600, "request requires string method"); return }
     method = GET_STRING
@@ -453,6 +464,7 @@ function register_source(args, title, reference, source_type_value, project, sta
     if (id == "") id = next_id("src")
     if (!valid_identifier(id, "register_source")) return
     if (id in source_json) { fail("source already exists: " id); return }
+    if (("source-" id) in node_json) { fail("source node id conflicts with existing graph node: source-" id); return }
     record = "{\"id\":" json_escape(id) ",\"kind\":\"source\",\"title\":" json_escape(title) ",\"reference\":" json_escape(reference) ",\"source_type\":" json_escape(source_type_value) ",\"project\":" json_escape(project) ",\"status\":" json_escape(status)
     if (uncertainty != "") record = record ",\"uncertainty\":" json_escape(uncertainty)
     if (notes != "") record = record ",\"notes\":" json_escape(notes)
@@ -473,6 +485,7 @@ function search_sources(args, query, project, limit, id, count, list, truncated)
 function add_node(args, id, node_type_value, label, source_ids, description, claim_status, confidence, record) {
     if (!required_nonempty_string(args, "node_id", "add_node")) return; id = GET_STRING
     if (!valid_identifier(id, "add_node")) return
+    if (is_reserved_source_node_id(id)) { fail("node id is reserved for a Source node: " id); return }
     if (id in node_json) { fail("node already exists: " id); return }
     if (!required_nonempty_string(args, "node_type", "add_node")) return; node_type_value = GET_STRING
     if (!required_nonempty_string(args, "label", "add_node")) return; label = GET_STRING
@@ -509,6 +522,15 @@ function add_edge(args, from, to, relation, source_ids, evidence, id, record) {
 }
 
 function rebuild_graph(id, node_id, record, count) {
+    for (id in rebuild_used) delete rebuild_used[id]
+    while ((id = next_source(rebuild_used, "", "")) != "") {
+        rebuild_used[id] = 1
+        node_id = "source-" id
+        if ((node_id in node_json) && !(node_type[node_id] == "Source" && node_claim_status[node_id] == "source-material" && node_sources[node_id] == "[" json_escape(id) "]")) {
+            fail("cannot rebuild source node; id conflicts with existing graph node: " node_id)
+            return
+        }
+    }
     count = 0
     for (id in rebuild_used) delete rebuild_used[id]
     while ((id = next_source(rebuild_used, "", "")) != "") {
@@ -521,6 +543,11 @@ function rebuild_graph(id, node_id, record, count) {
         node_json[node_id] = record; node_type[node_id] = "Source"; node_label[node_id] = source_title[id]; node_sources[node_id] = "[" json_escape(id) "]"; node_claim_status[node_id] = "source-material"; node_confidence[node_id] = "not-asserted"; node_description[node_id] = ""; node_reference[node_id] = source_reference[id]; node_status[node_id] = source_status[id]; node_uncertainty[node_id] = source_uncertainty[id]; node_search[node_id] = tolower("source " source_title[id] " " source_reference[id]); count++
     }
     tool_text("{\"rebuilt\":true,\"source_count\":" length_source() ",\"source_nodes\":" count ",\"preserved_derived_graph\":true,\"graph_note\":\"Source nodes were refreshed; interpreted nodes and relations remain intact.\"}")
+}
+
+function is_reserved_source_node_id(id, source_id) {
+    for (source_id in source_json) if (id == "source-" source_id) return 1
+    return 0
 }
 
 function length_source(id, n) { n = 0; for (id in source_json) n++; return n }
