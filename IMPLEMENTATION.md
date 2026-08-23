@@ -25,6 +25,10 @@ Use `discover` first when routing is unclear. The public tools register/search s
 
 `export_structure` is safe to share without project-specific source content. The `owlknowledge://structure` resource is intentionally the only graph resource: use `traverse_graph` for targeted context instead of loading the whole graph into an agent context. `rebuild_graph` is the recovery path after adding sources or refreshing source interpretation: source records and existing interpreted graph data remain intact, and every source can always produce a Source node again.
 
+Public projection truncation is byte-bounded and backs off to the last complete UTF-8 code point, so a 512-byte context limit never emits an invalid UTF-8 response.
+
+Invalid UTF-8 input is normalized at JSON output and append-only persistence boundaries, and malformed request lines that carry no `id` remain response-free.
+
 ## Verification
 
 ```sh

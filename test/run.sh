@@ -19,6 +19,9 @@ printf '%s\n' "$out" | grep '"protocolVersion":"2024-11-05"' >/dev/null
 out=$(call '{"jsonrpc":"2.0","method":"ping"}')
 [ -z "$out" ]
 
+out=$(printf '%s\n' '{"jsonrpc":"2.0","method":' | OWL_KNOWLEDGE_DATA_DIR="$tmp/malformed-notification-data" "$root/bin/owlknowledge-mcp")
+[ -z "$out" ]
+
 out=$(printf '%s\n' '{"jsonrpc":"1.0","method":"ping"}' '{"jsonrpc":"2.0","method":"ping"}' | OWL_KNOWLEDGE_DATA_DIR="$tmp/notification-data" "$root/bin/owlknowledge-mcp")
 [ -z "$out" ]
 
@@ -229,6 +232,15 @@ out=$(call '{"jsonrpc":"2.0","id":82,"method":"tools/call","params":{"name":"sea
 printf '%s\n' "$out" | grep 'title_truncated.*true' >/dev/null
 printf '%s\n' "$out" | grep 'reference_truncated.*true' >/dev/null
 if [ "$(printf '%s\n' "$out" | wc -c)" -gt 3000 ]; then exit 1; fi
+
+utf8_title=$(awk 'BEGIN { for (i = 1; i <= 171; i++) printf "\342\202\254" }')
+out=$(call "{\"jsonrpc\":\"2.0\",\"id\":821,\"method\":\"tools/call\",\"params\":{\"name\":\"register_source\",\"arguments\":{\"source_id\":\"utf8-boundary\",\"title\":\"$utf8_title\",\"reference\":\"utf8-boundary.md\",\"source_type\":\"paper\"}}}")
+printf '%s\n' "$out" | grep 'title_truncated.*true' >/dev/null
+printf '%s\n' "$out" | iconv -f UTF-8 -t UTF-8 >/dev/null
+
+out=$(printf '%b\n' '{"jsonrpc":"2.0","id":822,"method":"tools/call","params":{"name":"register_source","arguments":{"source_id":"bad-\377","title":"invalid utf8","reference":"invalid.md","source_type":"paper"}}}' | OWL_KNOWLEDGE_DATA_DIR="$tmp/invalid-utf8-data" "$root/bin/owlknowledge-mcp")
+printf '%s\n' "$out" | iconv -f UTF-8 -t UTF-8 >/dev/null
+iconv -f UTF-8 -t UTF-8 "$tmp/invalid-utf8-data/sources.jsonl" >/dev/null
 
 long_source_id=$(awk 'BEGIN { for (i = 1; i <= 250; i++) printf "i" }')
 out=$(call "{\"jsonrpc\":\"2.0\",\"id\":83,\"method\":\"tools/call\",\"params\":{\"name\":\"register_source\",\"arguments\":{\"source_id\":\"$long_source_id\",\"title\":\"too long\",\"reference\":\"too-long.md\",\"source_type\":\"paper\"}}}")
