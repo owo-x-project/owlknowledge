@@ -6,6 +6,7 @@ BEGIN {
     node_file = data_dir "/nodes.jsonl"
     edge_file = data_dir "/edges.jsonl"
     sequence = 0
+    MAX_CONTEXT_ITEMS = 20
     load_sources(); load_nodes(); load_edges()
 }
 
@@ -171,6 +172,7 @@ function required_nonempty_string(obj, name, label) { if (!required_string(obj, 
 function optional_string(obj, name, default_value) { object_get(obj, name); if (GET_PRESENT && substr(GET_RAW, 1, 1) == "\"") return GET_STRING; return default_value }
 function required_raw(obj, name, label) { object_get(obj, name); if (!GET_PRESENT || GET_RAW == "null") return fail(label " requires argument '" name "'"); return GET_RAW }
 function array_or_empty(obj, name, label, raw) { object_get(obj, name); raw = (GET_PRESENT ? GET_RAW : "[]"); if (substr(raw, 1, 1) != "[") { fail(label " '" name "' must be an array"); return "" }; return raw }
+function bounded_limit(obj, name, default_value, raw, value) { object_get(obj, name); value = default_value; if (GET_PRESENT && GET_RAW ~ /^[0-9]+$/) value = GET_RAW + 0; if (value < 1) value = 1; if (value > MAX_CONTEXT_ITEMS) value = MAX_CONTEXT_ITEMS; return value }
 
 function validate_source_ids(raw, label, i, start, e, item) {
     i = ws(raw, 2)
@@ -236,11 +238,11 @@ function tools_json() {
     return "{\"tools\":[" \
       "{\"name\":\"discover\",\"description\":\"Explain the source/derived-graph boundary and route the small public surface. Read-only.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}," \
       "{\"name\":\"register_source\",\"description\":\"Register a source reference without copying, rewriting, or declaring its contents true.\",\"inputSchema\":{\"type\":\"object\",\"required\":[\"title\",\"reference\",\"source_type\"],\"properties\":{\"title\":{\"type\":\"string\"},\"reference\":{\"type\":\"string\"},\"source_type\":{\"type\":\"string\"},\"project\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"uncertainty\":{\"type\":\"string\"},\"notes\":{\"type\":\"string\"},\"source_id\":{\"type\":\"string\"}}}}," \
-      "{\"name\":\"search_sources\",\"description\":\"Find source metadata by title, reference, type, project, or uncertainty/status.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"},\"project\":{\"type\":\"string\"},\"limit\":{\"type\":\"integer\"}}}}," \
+      "{\"name\":\"search_sources\",\"description\":\"Find source metadata by title, reference, type, project, or uncertainty/status. Results are hard-capped at 20.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"},\"project\":{\"type\":\"string\"},\"limit\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":20}}}}," \
       "{\"name\":\"rebuild_graph\",\"description\":\"Refresh derived Source nodes without deleting interpreted graph data; source records are never changed.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}," \
       "{\"name\":\"add_node\",\"description\":\"Add an interpreted graph node while retaining source ids, claim status, and uncertainty metadata.\",\"inputSchema\":{\"type\":\"object\",\"required\":[\"node_id\",\"node_type\",\"label\"],\"properties\":{\"node_id\":{\"type\":\"string\"},\"node_type\":{\"type\":\"string\"},\"label\":{\"type\":\"string\"},\"source_ids\":{\"type\":\"array\"},\"description\":{\"type\":\"string\"},\"claim_status\":{\"type\":\"string\"},\"confidence\":{\"type\":\"string\"}}}}," \
       "{\"name\":\"add_edge\",\"description\":\"Add a typed relation such as references, supports, contradicts, derived-from, related-to, or evaluates.\",\"inputSchema\":{\"type\":\"object\",\"required\":[\"from\",\"to\",\"relation\"],\"properties\":{\"from\":{\"type\":\"string\"},\"to\":{\"type\":\"string\"},\"relation\":{\"type\":\"string\"},\"source_ids\":{\"type\":\"array\"},\"evidence\":{},\"edge_id\":{\"type\":\"string\"}}}}," \
-      "{\"name\":\"traverse_graph\",\"description\":\"Trace a bounded number of one-hop related nodes and edges back to their source references.\",\"inputSchema\":{\"type\":\"object\",\"required\":[\"node_id\"],\"properties\":{\"node_id\":{\"type\":\"string\"},\"relation\":{\"type\":\"string\"},\"limit\":{\"type\":\"integer\",\"minimum\":1}}}}," \
+      "{\"name\":\"traverse_graph\",\"description\":\"Trace a bounded number of one-hop related nodes and edges back to their source references. Results are hard-capped at 20.\",\"inputSchema\":{\"type\":\"object\",\"required\":[\"node_id\"],\"properties\":{\"node_id\":{\"type\":\"string\"},\"relation\":{\"type\":\"string\"},\"limit\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":20}}}}," \
       "{\"name\":\"export_structure\",\"description\":\"Export node and relation types only, with no source contents, for structure sharing and evolution.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}]}"
 }
 
@@ -291,12 +293,13 @@ function register_source(args, title, reference, source_type_value, project, sta
     tool_text("Registered source reference " id ". Its contents remain outside the derived graph.\n" record)
 }
 
-function search_sources(args, query, project, limit, id, count, list) {
-    query = optional_string(args, "query", ""); project = optional_string(args, "project", ""); object_get(args, "limit"); limit = (GET_PRESENT && GET_RAW ~ /^[0-9]+$/ ? GET_RAW + 0 : 20); if (limit < 1) limit = 1
+function search_sources(args, query, project, limit, id, count, list, truncated) {
+    query = optional_string(args, "query", ""); project = optional_string(args, "project", ""); limit = bounded_limit(args, "limit", MAX_CONTEXT_ITEMS)
     for (id in source_used) delete source_used[id]
     list = "["; count = 0
     while (count < limit && (id = next_source(source_used, query, project)) != "") { source_used[id] = 1; if (count > 0) list = list ","; list = list source_json[id]; count++ }
-    tool_text("{\"count\":" count ",\"sources\":" list "]}")
+    truncated = (next_source(source_used, query, project) != "")
+    tool_text("{\"count\":" count ",\"truncated\":" (truncated ? "true" : "false") ",\"sources\":" list "]}")
 }
 
 function add_node(args, id, node_type_value, label, source_ids, description, claim_status, confidence, record) {
@@ -349,7 +352,7 @@ function length_source(id, n) { n = 0; for (id in source_json) n++; return n }
 function traverse_graph(args, id, relation, eid, list_edges, list_nodes, count_edges, count_nodes, other, limit, truncated) {
     if (!required_string(args, "node_id", "traverse_graph")) return; id = GET_STRING
     if (!(id in node_json)) { fail("unknown graph node: " id); return }
-    relation = optional_string(args, "relation", ""); object_get(args, "limit"); limit = (GET_PRESENT && GET_RAW ~ /^[0-9]+$/ ? GET_RAW + 0 : 20); if (limit < 1) limit = 1
+    relation = optional_string(args, "relation", ""); limit = bounded_limit(args, "limit", MAX_CONTEXT_ITEMS)
     for (eid in traverse_used) delete traverse_used[eid]
     list_edges = "["; list_nodes = "["; count_edges = 0; count_nodes = 0; truncated = 0
     while (count_edges < limit && (eid = next_related_edge(traverse_used, id, relation)) != "") {

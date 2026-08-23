@@ -26,6 +26,7 @@ printf '%s\n' "$out" | grep 'source_count.*2' >/dev/null
 
 out=$(call '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"search_sources","arguments":{"query":"unverified"}}}')
 printf '%s\n' "$out" | grep 'paper-a' >/dev/null
+printf '%s\n' "$out" | grep 'truncated.*false' >/dev/null
 
 out=$(call '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"add_node","arguments":{"node_id":"claim-a","node_type":"Claim","label":"SQLite is sufficient","source_ids":["paper-a"],"claim_status":"hypothesis","confidence":"low"}}}')
 printf '%s\n' "$out" | grep 'claim-a' >/dev/null
@@ -47,6 +48,14 @@ printf '%s\n' "$out" | grep 'SQLite paper' >/dev/null
 printf '%s\n' "$out" | grep 'edge-a.*edge-b' >/dev/null
 
 out=$(call '{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"traverse_graph","arguments":{"node_id":"claim-a","limit":1}}}')
+printf '%s\n' "$out" | grep 'truncated.*true' >/dev/null
+
+n=1
+while [ "$n" -le 21 ]; do
+    call "{\"jsonrpc\":\"2.0\",\"id\":$((n + 21)),\"method\":\"tools/call\",\"params\":{\"name\":\"add_edge\",\"arguments\":{\"edge_id\":\"edge-bound-$n\",\"from\":\"claim-a\",\"to\":\"claim-b\",\"relation\":\"related-to\",\"source_ids\":[\"paper-a\"]}}}}" >/dev/null
+    n=$((n + 1))
+done
+out=$(call '{"jsonrpc":"2.0","id":50,"method":"tools/call","params":{"name":"traverse_graph","arguments":{"node_id":"claim-a","limit":999999}}}')
 printf '%s\n' "$out" | grep 'truncated.*true' >/dev/null
 
 out=$(call '{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"export_structure","arguments":{}}}')
@@ -77,6 +86,15 @@ printf '%s\n' "$out" | grep 'unknown source' >/dev/null
 
 out=$(call '{"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"add_edge","arguments":{"edge_id":"orphan-edge","from":"claim-a","to":"claim-b","relation":"supports","source_ids":["missing-source"]}}}')
 printf '%s\n' "$out" | grep 'unknown source' >/dev/null
+
+n=1
+while [ "$n" -le 21 ]; do
+    call "{\"jsonrpc\":\"2.0\",\"id\":$((n + 50)),\"method\":\"tools/call\",\"params\":{\"name\":\"register_source\",\"arguments\":{\"source_id\":\"bounded-source-$n\",\"title\":\"Bounded source $n\",\"reference\":\"docs/bounded-$n.md\",\"source_type\":\"paper\"}}}}" >/dev/null
+    n=$((n + 1))
+done
+out=$(call '{"jsonrpc":"2.0","id":80,"method":"tools/call","params":{"name":"search_sources","arguments":{"query":"Bounded source","limit":999999}}}')
+printf '%s\n' "$out" | grep 'count.*20' >/dev/null
+printf '%s\n' "$out" | grep 'truncated.*true' >/dev/null
 
 if grep 'orphan-claim' "$tmp/data/nodes.jsonl" >/dev/null; then exit 1; fi
 if grep 'orphan-edge' "$tmp/data/edges.jsonl" >/dev/null; then exit 1; fi
