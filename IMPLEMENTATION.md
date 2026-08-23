@@ -17,6 +17,8 @@ The data directory contains JSON Lines files:
 
 Source formats are intentionally open: paths, URLs, Markdown, PDF, papers, meetings, experiments, code, and external specifications are all references. Source `status` and optional `uncertainty` are preserved verbatim. Interpreted claims retain `source_ids`, `claim_status`, and `confidence`; contradictory material is represented with independent nodes and a `contradicts` edge rather than being merged.
 
+Required source metadata cannot be empty, and graph nodes or relations cannot cite a source that is not registered. Search results, rebuilt Source nodes, graph traversal, and exported structure use stable identifier order so bounded context remains repeatable.
+
 ## MCP surface
 
 Use `discover` first when routing is unclear. The public tools register/search sources, rebuild the derived graph, add nodes/relations, trace bounded one-hop context, and export structure. Initial relation names include `references`, `supports`, `contradicts`, `derived-from`, `related-to`, and `evaluates`, while the graph can evolve with additional relation names when useful. The `owlknowledge://structure` resource exports only types and relations; use bounded `traverse_graph` for targeted derived context.

@@ -8,4 +8,4 @@ target = "test/run.sh"
 
 # Verify decision-material tracing
 
-Run `./test/run.sh`. The scenario connects source-linked claims with supports and contradicts relations and traverses them back to a source reference.
+Run `./test/run.sh`. The scenario connects source-linked claims with supports and contradicts relations, traverses them back to source references in stable edge order, and limits traversal output to a bounded one-hop context.

@@ -44,6 +44,7 @@ printf '%s\n' "$out" | grep 'preserved_derived_graph' >/dev/null
 
 out=$(call '{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"traverse_graph","arguments":{"node_id":"claim-a"}}}')
 printf '%s\n' "$out" | grep 'SQLite paper' >/dev/null
+printf '%s\n' "$out" | grep 'edge-a.*edge-b' >/dev/null
 
 out=$(call '{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"traverse_graph","arguments":{"node_id":"claim-a","limit":1}}}')
 printf '%s\n' "$out" | grep 'truncated.*true' >/dev/null
@@ -51,6 +52,8 @@ printf '%s\n' "$out" | grep 'truncated.*true' >/dev/null
 out=$(call '{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"export_structure","arguments":{}}}')
 printf '%s\n' "$out" | grep 'supports' >/dev/null
 printf '%s\n' "$out" | grep 'contradicts' >/dev/null
+printf '%s\n' "$out" | grep 'node_types.*Claim.*Source' >/dev/null
+printf '%s\n' "$out" | grep 'relations.*contradicts.*supports' >/dev/null
 if printf '%s\n' "$out" | grep 'docs/sqlite.md' >/dev/null; then exit 1; fi
 
 out=$(call '{"jsonrpc":"2.0","id":15,"method":"resources/read","params":{"uri":"owlknowledge://structure"}}')
@@ -65,5 +68,17 @@ printf '%s\n' "$out" | grep 'unknown tool' >/dev/null
 
 out=$(call '{"jsonrpc":"2.0","id":18,"method":"tools/call","params":{"name":"register_source","arguments":{"title":"Missing reference","source_type":"paper"}}}')
 printf '%s\n' "$out" | grep 'requires string argument' >/dev/null
+
+out=$(call '{"jsonrpc":"2.0","id":19,"method":"tools/call","params":{"name":"register_source","arguments":{"title":"","reference":"docs/empty.md","source_type":"paper"}}}')
+printf '%s\n' "$out" | grep 'non-empty string' >/dev/null
+
+out=$(call '{"jsonrpc":"2.0","id":20,"method":"tools/call","params":{"name":"add_node","arguments":{"node_id":"orphan-claim","node_type":"Claim","label":"orphan","source_ids":["missing-source"]}}}')
+printf '%s\n' "$out" | grep 'unknown source' >/dev/null
+
+out=$(call '{"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"add_edge","arguments":{"edge_id":"orphan-edge","from":"claim-a","to":"claim-b","relation":"supports","source_ids":["missing-source"]}}}')
+printf '%s\n' "$out" | grep 'unknown source' >/dev/null
+
+if grep 'orphan-claim' "$tmp/data/nodes.jsonl" >/dev/null; then exit 1; fi
+if grep 'orphan-edge' "$tmp/data/edges.jsonl" >/dev/null; then exit 1; fi
 
 printf '%s\n' 'OwlKnowledge tests passed.'
