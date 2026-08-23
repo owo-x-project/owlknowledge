@@ -25,6 +25,12 @@ printf '%s\n' "$out" | grep 'requires jsonrpc 2.0' >/dev/null
 out=$(call '{"jsonrpc":"2.0","id":{"bad":1},"method":"ping"}')
 printf '%s\n' "$out" | grep 'request id must be a string' >/dev/null
 
+out=$(call '{"jsonrpc":"2.0","id":1,"method":"ping","method":"not-found"}')
+printf '%s\n' "$out" | grep 'parse error' >/dev/null
+
+out=$(call '{"jsonrpc":"2.0","id":1,"method":"initialize","params":false}')
+printf '%s\n' "$out" | grep 'params must be an object or array' >/dev/null
+
 out=$(call '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"discover","arguments":{}}}')
 printf '%s\n' "$out" | grep 'register_source' >/dev/null
 
@@ -160,12 +166,22 @@ out=$(call '{"jsonrpc":"2.0","id":80,"method":"tools/call","params":{"name":"sea
 printf '%s\n' "$out" | grep 'count.*20' >/dev/null
 printf '%s\n' "$out" | grep 'truncated.*true' >/dev/null
 
+out=$(call '{"jsonrpc":"2.0","id":801,"method":"tools/call","params":{"name":"search_sources","arguments":{"query":"Bounded source","limit":"1"}}}')
+printf '%s\n' "$out" | grep 'positive integer argument' >/dev/null
+out=$(call '{"jsonrpc":"2.0","id":802,"method":"tools/call","params":{"name":"search_sources","arguments":{"query":"Bounded source","limit":0}}}')
+printf '%s\n' "$out" | grep 'positive integer argument' >/dev/null
+
 long_source=$(awk 'BEGIN { for (i = 1; i <= 6000; i++) printf "x" }')
 call "{\"jsonrpc\":\"2.0\",\"id\":81,\"method\":\"tools/call\",\"params\":{\"name\":\"register_source\",\"arguments\":{\"source_id\":\"source-long\",\"title\":\"$long_source\",\"reference\":\"$long_source\",\"source_type\":\"paper\",\"notes\":\"$long_source\"}}}" >/dev/null
 out=$(call '{"jsonrpc":"2.0","id":82,"method":"tools/call","params":{"name":"search_sources","arguments":{"query":"xxxxxxxx"}}}')
 printf '%s\n' "$out" | grep 'title_truncated.*true' >/dev/null
 printf '%s\n' "$out" | grep 'reference_truncated.*true' >/dev/null
 if [ "$(printf '%s\n' "$out" | wc -c)" -gt 3000 ]; then exit 1; fi
+
+long_source_id=$(awk 'BEGIN { for (i = 1; i <= 250; i++) printf "i" }')
+out=$(call "{\"jsonrpc\":\"2.0\",\"id\":83,\"method\":\"tools/call\",\"params\":{\"name\":\"register_source\",\"arguments\":{\"source_id\":\"$long_source_id\",\"title\":\"too long\",\"reference\":\"too-long.md\",\"source_type\":\"paper\"}}}")
+printf '%s\n' "$out" | grep 'identifier exceeds 249' >/dev/null
+if grep "$long_source_id" "$tmp/data/sources.jsonl" >/dev/null; then exit 1; fi
 
 if grep 'orphan-claim' "$tmp/data/nodes.jsonl" >/dev/null; then exit 1; fi
 if grep 'orphan-edge' "$tmp/data/edges.jsonl" >/dev/null; then exit 1; fi
@@ -175,6 +191,34 @@ mkdir -p "$partial_data"
 printf '%s' '{"id":"partial-source"' > "$partial_data/sources.jsonl"
 out=$(call_data "$partial_data" '{"jsonrpc":"2.0","id":83,"method":"tools/call","params":{"name":"search_sources","arguments":{}}}')
 printf '%s\n' "$out" | grep 'count.*0' >/dev/null
+
+oversized_request=$(awk 'BEGIN { for (i = 1; i <= 66000; i++) printf "x" }')
+out=$(call "{\"jsonrpc\":\"2.0\",\"id\":84,\"method\":\"ping\",\"params\":{\"padding\":\"$oversized_request\"}}")
+printf '%s\n' "$out" | grep 'request exceeds 65536 characters' >/dev/null
+
+reload_data="$tmp/reload-data"
+mkdir -p "$reload_data"
+printf '%s\n' '{"id":"s1","kind":"source","title":"reload source","reference":"reload.md","source_type":"paper","project":"reload","status":"unverified"}' > "$reload_data/sources.jsonl"
+printf '%s\n' '{"id":"duplicate","id":"duplicate","kind":"source","title":"must be ignored","reference":"duplicate.md","source_type":"paper","project":"reload","status":"unverified"}' >> "$reload_data/sources.jsonl"
+printf '%s\n' '{"id":"n1","kind":"node","node_type":"Claim","label":"reload claim","source_ids":["s1"],"claim_status":"hypothesis","confidence":"low"}' > "$reload_data/nodes.jsonl"
+printf '%s\n' '{"id":"ghost-node","kind":"node","node_type":"Claim","label":"must be ignored","source_ids":["missing"],"claim_status":"hypothesis","confidence":"low"}' >> "$reload_data/nodes.jsonl"
+printf '%s\n' '{"id":"duplicate-citation","kind":"node","node_type":"Claim","label":"must be ignored","source_ids":["s1","s1"],"claim_status":"hypothesis","confidence":"low"}' >> "$reload_data/nodes.jsonl"
+printf '%s\n' '{"id":"e1","kind":"edge","from":"n1","to":"n1","relation":"supports","source_ids":["s1"]}' > "$reload_data/edges.jsonl"
+printf '%s\n' '{"id":"eghost","kind":"edge","from":"n1","to":"ghost-node","relation":"supports","source_ids":["s1"]}' >> "$reload_data/edges.jsonl"
+printf '%s\n' '{"id":"eunknown-source","kind":"edge","from":"n1","to":"n1","relation":"supports","source_ids":["missing"]}' >> "$reload_data/edges.jsonl"
+out=$(call_data "$reload_data" '{"jsonrpc":"2.0","id":85,"method":"tools/call","params":{"name":"traverse_graph","arguments":{"node_id":"n1"}}}')
+printf '%s\n' "$out" | grep 'e1' >/dev/null
+if printf '%s\n' "$out" | grep 'eghost\|ghost-node\|eunknown-source' >/dev/null; then exit 1; fi
+out=$(call_data "$reload_data" '{"jsonrpc":"2.0","id":86,"method":"tools/call","params":{"name":"search_sources","arguments":{}}}')
+printf '%s\n' "$out" | grep 'count.*1' >/dev/null
+if printf '%s\n' "$out" | grep 'must be ignored' >/dev/null; then exit 1; fi
+
+malformed_lock_data="$tmp/malformed-lock-data"
+mkdir -p "$malformed_lock_data"
+printf '%s\n' 'not-a-pid' > "$malformed_lock_data/.owlknowledge.lock"
+out=$(call_data "$malformed_lock_data" '{"jsonrpc":"2.0","id":87,"method":"ping"}')
+printf '%s\n' "$out" | grep '"result":{}' >/dev/null
+[ ! -e "$malformed_lock_data/.owlknowledge.lock" ]
 
 concurrent_data="$tmp/concurrent-data"
 n=1
