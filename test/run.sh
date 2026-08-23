@@ -9,6 +9,10 @@ call() {
     printf '%s\n' "$1" | OWL_KNOWLEDGE_DATA_DIR="$tmp/data" "$root/bin/owlknowledge-mcp"
 }
 
+call_data() {
+    printf '%s\n' "$2" | OWL_KNOWLEDGE_DATA_DIR="$1" "$root/bin/owlknowledge-mcp"
+}
+
 out=$(call '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}')
 printf '%s\n' "$out" | grep '"protocolVersion":"2024-11-05"' >/dev/null
 
@@ -41,6 +45,19 @@ out=$(call '{"jsonrpc":"2.0","id":61,"method":"tools/call","params":{"name":"add
 printf '%s\n' "$out" | grep 'node id is reserved for a Source node' >/dev/null
 if grep 'must not shadow source node' "$tmp/data/nodes.jsonl" >/dev/null; then exit 1; fi
 
+out=$(call '{"jsonrpc":"2.0","id":62,"method":"tools/call","params":{"name":"register_source","arguments":{"source_id":"bad-optional-type","title":"Bad optional type","reference":"bad.md","source_type":"paper","project":123}}}')
+printf '%s\n' "$out" | grep 'requires string argument' >/dev/null
+if grep 'bad-optional-type' "$tmp/data/sources.jsonl" >/dev/null; then exit 1; fi
+
+out=$(call '{"jsonrpc":"2.0","id":63,"method":"tools/call","params":{"name":"register_source","arguments":{"source_id":"unicode-\u00e9","title":"Unicode source","reference":"unicode.md","source_type":"paper"}}}')
+printf '%s\n' "$out" | grep 'unicode-' >/dev/null
+out=$(call '{"jsonrpc":"2.0","id":64,"method":"tools/call","params":{"name":"register_source","arguments":{"source_id":"unicode-é","title":"Duplicate Unicode source","reference":"unicode-2.md","source_type":"paper"}}}')
+printf '%s\n' "$out" | grep 'source already exists' >/dev/null
+out=$(call '{"jsonrpc":"2.0","id":65,"method":"tools/call","params":{"name":"register_source","arguments":{"source_id":"emoji-\ud83d\ude00","title":"Emoji source","reference":"emoji.md","source_type":"paper"}}}')
+printf '%s\n' "$out" | grep 'emoji-' >/dev/null
+out=$(call '{"jsonrpc":"2.0","id":66,"method":"tools/call","params":{"name":"register_source","arguments":{"source_id":"emoji-😀","title":"Duplicate emoji source","reference":"emoji-2.md","source_type":"paper"}}}')
+printf '%s\n' "$out" | grep 'source already exists' >/dev/null
+
 out=$(call '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"add_node","arguments":{"node_id":"claim-a","node_type":"Claim","label":"SQLite is sufficient","source_ids":["paper-a"],"claim_status":"hypothesis","confidence":"low"}}}')
 printf '%s\n' "$out" | grep 'claim-a' >/dev/null
 
@@ -49,6 +66,14 @@ printf '%s\n' "$out" | grep 'claim-b' >/dev/null
 
 out=$(call '{"jsonrpc":"2.0","id":811,"method":"tools/call","params":{"name":"add_node","arguments":{"node_id":"claim-b","node_type":"Claim","label":"duplicate","source_ids":["experiment-b"]}}}')
 printf '%s\n' "$out" | grep 'node already exists' >/dev/null
+
+out=$(call '{"jsonrpc":"2.0","id":812,"method":"tools/call","params":{"name":"add_node","arguments":{"node_id":"claim-duplicate-source","node_type":"Claim","label":"duplicate source citation","source_ids":["paper-a","paper-a"]}}}')
+printf '%s\n' "$out" | grep 'duplicate source id' >/dev/null
+if grep 'claim-duplicate-source' "$tmp/data/nodes.jsonl" >/dev/null; then exit 1; fi
+
+out=$(call '{"jsonrpc":"2.0","id":813,"method":"tools/call","params":{"name":"add_node","arguments":{"node_id":"claim-bad-optional-type","node_type":"Claim","label":"bad optional type","source_ids":[],"description":false}}}')
+printf '%s\n' "$out" | grep 'requires string argument' >/dev/null
+if grep 'claim-bad-optional-type' "$tmp/data/nodes.jsonl" >/dev/null; then exit 1; fi
 
 long_description=$(awk 'BEGIN { for (i = 1; i <= 600; i++) printf "x" }')
 out=$(call "{\"jsonrpc\":\"2.0\",\"id\":81,\"method\":\"tools/call\",\"params\":{\"name\":\"add_node\",\"arguments\":{\"node_id\":\"claim-long\",\"node_type\":\"Claim\",\"label\":\"Long claim\",\"source_ids\":[\"paper-a\"],\"claim_status\":\"hypothesis\",\"confidence\":\"low\",\"description\":\"$long_description\"}}}")
@@ -144,5 +169,33 @@ if [ "$(printf '%s\n' "$out" | wc -c)" -gt 3000 ]; then exit 1; fi
 
 if grep 'orphan-claim' "$tmp/data/nodes.jsonl" >/dev/null; then exit 1; fi
 if grep 'orphan-edge' "$tmp/data/edges.jsonl" >/dev/null; then exit 1; fi
+
+partial_data="$tmp/partial-data"
+mkdir -p "$partial_data"
+printf '%s' '{"id":"partial-source"' > "$partial_data/sources.jsonl"
+out=$(call_data "$partial_data" '{"jsonrpc":"2.0","id":83,"method":"tools/call","params":{"name":"search_sources","arguments":{}}}')
+printf '%s\n' "$out" | grep 'count.*0' >/dev/null
+
+concurrent_data="$tmp/concurrent-data"
+n=1
+while [ "$n" -le 4 ]; do
+    printf '%s\n' '{"jsonrpc":"2.0","id":84,"method":"tools/call","params":{"name":"register_source","arguments":{"title":"concurrent source","reference":"concurrent.md","source_type":"experiment"}}}' |
+        OWL_KNOWLEDGE_DATA_DIR="$concurrent_data" "$root/bin/owlknowledge-mcp" > "$tmp/source-$n.out" &
+    n=$((n + 1))
+done
+wait
+out=$(call_data "$concurrent_data" '{"jsonrpc":"2.0","id":85,"method":"tools/call","params":{"name":"search_sources","arguments":{"query":"concurrent source","limit":20}}}')
+printf '%s\n' "$out" | grep 'count.*4' >/dev/null
+
+node_data="$tmp/concurrent-nodes"
+call_data "$node_data" '{"jsonrpc":"2.0","id":86,"method":"tools/call","params":{"name":"register_source","arguments":{"source_id":"node-concurrency-source","title":"node concurrency source","reference":"node.md","source_type":"experiment"}}}' >/dev/null
+n=1
+while [ "$n" -le 5 ]; do
+    printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":87,\"method\":\"tools/call\",\"params\":{\"name\":\"add_node\",\"arguments\":{\"node_id\":\"concurrent-node-$n\",\"node_type\":\"Claim\",\"label\":\"concurrent node\",\"source_ids\":[\"node-concurrency-source\"]}}}" |
+        OWL_KNOWLEDGE_DATA_DIR="$node_data" "$root/bin/owlknowledge-mcp" > "$tmp/node-$n.out" &
+    n=$((n + 1))
+done
+wait
+[ "$(wc -l < "$node_data/nodes.jsonl")" -eq 5 ]
 
 printf '%s\n' 'OwlKnowledge tests passed.'
