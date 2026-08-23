@@ -19,6 +19,20 @@ printf '%s\n' "$out" | grep '"protocolVersion":"2024-11-05"' >/dev/null
 out=$(call '{"jsonrpc":"2.0","method":"ping"}')
 [ -z "$out" ]
 
+out=$(printf '%s\n' '{"jsonrpc":"1.0","method":"ping"}' '{"jsonrpc":"2.0","method":"ping"}' | OWL_KNOWLEDGE_DATA_DIR="$tmp/notification-data" "$root/bin/owlknowledge-mcp")
+[ -z "$out" ]
+
+zero_lock_data="$tmp/zero-lock-data"
+mkdir -p "$zero_lock_data"
+printf '%s\n' '0' > "$zero_lock_data/.owlknowledge.lock"
+out=$(call_data "$zero_lock_data" '{"jsonrpc":"2.0","id":102,"method":"ping"}')
+printf '%s\n' "$out" | grep '"result":{}' >/dev/null
+[ ! -e "$zero_lock_data/.owlknowledge.lock" ]
+
+out=$(printf '%s\n' '{"jsonrpc":"2.0","id":101,"method":"shutdown"}' '{"jsonrpc":"2.0","method":"exit"}' '{"jsonrpc":"2.0","id":102,"method":"ping"}' | OWL_KNOWLEDGE_DATA_DIR="$tmp/lifecycle-data" "$root/bin/owlknowledge-mcp")
+[ "$(printf '%s\n' "$out" | wc -l)" -eq 1 ]
+printf '%s\n' "$out" | grep '"result":null' >/dev/null
+
 out=$(call '{"jsonrpc":"1.0","id":1,"method":"ping"}')
 printf '%s\n' "$out" | grep 'requires jsonrpc 2.0' >/dev/null
 
@@ -52,8 +66,12 @@ printf '%s\n' "$out" | grep 'node id is reserved for a Source node' >/dev/null
 if grep 'must not shadow source node' "$tmp/data/nodes.jsonl" >/dev/null; then exit 1; fi
 
 out=$(call '{"jsonrpc":"2.0","id":62,"method":"tools/call","params":{"name":"register_source","arguments":{"source_id":"bad-optional-type","title":"Bad optional type","reference":"bad.md","source_type":"paper","project":123}}}')
-printf '%s\n' "$out" | grep 'requires string argument' >/dev/null
+printf '%s\n' "$out" | grep 'requires .*string argument' >/dev/null
 if grep 'bad-optional-type' "$tmp/data/sources.jsonl" >/dev/null; then exit 1; fi
+
+out=$(call '{"jsonrpc":"2.0","id":621,"method":"tools/call","params":{"name":"register_source","arguments":{"source_id":"empty-source-fields","title":"Empty fields","reference":"empty.md","source_type":"paper","project":"","status":""}}}')
+printf '%s\n' "$out" | grep 'non-empty string argument' >/dev/null
+if grep 'empty-source-fields' "$tmp/data/sources.jsonl" >/dev/null; then exit 1; fi
 
 out=$(call '{"jsonrpc":"2.0","id":63,"method":"tools/call","params":{"name":"register_source","arguments":{"source_id":"unicode-\u00e9","title":"Unicode source","reference":"unicode.md","source_type":"paper"}}}')
 printf '%s\n' "$out" | grep 'unicode-' >/dev/null
@@ -63,6 +81,11 @@ out=$(call '{"jsonrpc":"2.0","id":65,"method":"tools/call","params":{"name":"reg
 printf '%s\n' "$out" | grep 'emoji-' >/dev/null
 out=$(call '{"jsonrpc":"2.0","id":66,"method":"tools/call","params":{"name":"register_source","arguments":{"source_id":"emoji-😀","title":"Duplicate emoji source","reference":"emoji-2.md","source_type":"paper"}}}')
 printf '%s\n' "$out" | grep 'source already exists' >/dev/null
+printf '%s\n' "$out" | jq -e . >/dev/null
+
+out=$(call '{"jsonrpc":"2.0","id":67,"method":"tools/call","params":{"name":"register_source","arguments":{"source_id":" ","title":"Whitespace id","reference":"whitespace.md","source_type":"paper"}}}')
+printf '%s\n' "$out" | grep 'requires a non-empty identifier' >/dev/null
+if grep 'Whitespace id' "$tmp/data/sources.jsonl" >/dev/null; then exit 1; fi
 
 out=$(call '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"add_node","arguments":{"node_id":"claim-a","node_type":"Claim","label":"SQLite is sufficient","source_ids":["paper-a"],"claim_status":"hypothesis","confidence":"low"}}}')
 printf '%s\n' "$out" | grep 'claim-a' >/dev/null
@@ -80,6 +103,13 @@ if grep 'claim-duplicate-source' "$tmp/data/nodes.jsonl" >/dev/null; then exit 1
 out=$(call '{"jsonrpc":"2.0","id":813,"method":"tools/call","params":{"name":"add_node","arguments":{"node_id":"claim-bad-optional-type","node_type":"Claim","label":"bad optional type","source_ids":[],"description":false}}}')
 printf '%s\n' "$out" | grep 'requires string argument' >/dev/null
 if grep 'claim-bad-optional-type' "$tmp/data/nodes.jsonl" >/dev/null; then exit 1; fi
+
+out=$(call '{"jsonrpc":"2.0","id":814,"method":"tools/call","params":{"name":"add_node","arguments":{"node_id":"claim-empty-fields","node_type":"Claim","label":"empty fields","source_ids":[],"claim_status":"","confidence":""}}}')
+printf '%s\n' "$out" | grep 'non-empty string argument' >/dev/null
+if grep 'claim-empty-fields' "$tmp/data/nodes.jsonl" >/dev/null; then exit 1; fi
+
+out=$(call '{"jsonrpc":"2.0","id":815,"method":"tools/call","params":{"name":"add_node","arguments":{"node_id":" ","node_type":"Claim","label":"whitespace id","source_ids":[]}}}')
+printf '%s\n' "$out" | grep 'requires a non-empty string argument' >/dev/null
 
 long_description=$(awk 'BEGIN { for (i = 1; i <= 600; i++) printf "x" }')
 out=$(call "{\"jsonrpc\":\"2.0\",\"id\":81,\"method\":\"tools/call\",\"params\":{\"name\":\"add_node\",\"arguments\":{\"node_id\":\"claim-long\",\"node_type\":\"Claim\",\"label\":\"Long claim\",\"source_ids\":[\"paper-a\"],\"claim_status\":\"hypothesis\",\"confidence\":\"low\",\"description\":\"$long_description\"}}}")
@@ -157,6 +187,28 @@ out=$(call '{"jsonrpc":"2.0","id":212,"method":"tools/call","params":{"name":"re
 printf '%s\n' "$out" | grep 'conflicts with existing graph node' >/dev/null
 if grep '"id":"future"' "$tmp/data/sources.jsonl" >/dev/null; then exit 1; fi
 
+out=$(call '{"jsonrpc":"2.0","id":213,"method":"tools/call","params":{"name":"add_edge","arguments":{"edge_id":" ","from":"claim-a","to":"claim-b","relation":"related-to"}}}')
+printf '%s\n' "$out" | grep 'requires a non-empty identifier' >/dev/null
+
+response_data="$tmp/response-bound-data"
+mkdir -p "$response_data"
+response_text=$(awk 'BEGIN { for (i = 1; i <= 6000; i++) printf "r" }')
+n=1
+while [ "$n" -le 20 ]; do
+    call_data "$response_data" "{\"jsonrpc\":\"2.0\",\"id\":$((214 + n)),\"method\":\"tools/call\",\"params\":{\"name\":\"register_source\",\"arguments\":{\"source_id\":\"response-$n\",\"title\":\"response bound $response_text\",\"reference\":\"$response_text\",\"source_type\":\"paper\",\"notes\":\"$response_text\"}}}" >/dev/null
+    n=$((n + 1))
+done
+out=$(call_data "$response_data" '{"jsonrpc":"2.0","id":236,"method":"tools/call","params":{"name":"search_sources","arguments":{"query":"response bound","limit":20}}}')
+printf '%s\n' "$out" | grep 'truncated.*bytes' >/dev/null
+
+collision_data="$tmp/generated-id-collision-data"
+mkdir -p "$collision_data"
+collision_epoch=$(date +%s)
+printf '%s\n' "{\"id\":\"source-src-$collision_epoch-2\",\"kind\":\"node\",\"node_type\":\"Claim\",\"label\":\"collision seed\",\"source_ids\":[],\"claim_status\":\"hypothesis\",\"confidence\":\"low\"}" > "$collision_data/nodes.jsonl"
+out=$(call_data "$collision_data" '{"jsonrpc":"2.0","id":237,"method":"tools/call","params":{"name":"register_source","arguments":{"title":"collision generated","reference":"collision.md","source_type":"paper"}}}')
+printf '%s\n' "$out" | grep 'Registered source reference' >/dev/null
+[ "$(wc -l < "$collision_data/sources.jsonl")" -eq 1 ]
+
 n=1
 while [ "$n" -le 21 ]; do
     call "{\"jsonrpc\":\"2.0\",\"id\":$((n + 50)),\"method\":\"tools/call\",\"params\":{\"name\":\"register_source\",\"arguments\":{\"source_id\":\"bounded-source-$n\",\"title\":\"Bounded source $n\",\"reference\":\"docs/bounded-$n.md\",\"source_type\":\"paper\"}}}" >/dev/null
@@ -200,18 +252,35 @@ reload_data="$tmp/reload-data"
 mkdir -p "$reload_data"
 printf '%s\n' '{"id":"s1","kind":"source","title":"reload source","reference":"reload.md","source_type":"paper","project":"reload","status":"unverified"}' > "$reload_data/sources.jsonl"
 printf '%s\n' '{"id":"duplicate","id":"duplicate","kind":"source","title":"must be ignored","reference":"duplicate.md","source_type":"paper","project":"reload","status":"unverified"}' >> "$reload_data/sources.jsonl"
+printf '%s\n' '{"id":"same-source","kind":"source","title":"first source","reference":"first.md","source_type":"paper","project":"reload","status":"unverified"}' >> "$reload_data/sources.jsonl"
+printf '%s\n' '{"id":"same-source","kind":"source","title":"second source","reference":"second.md","source_type":"paper","project":"reload","status":"unverified"}' >> "$reload_data/sources.jsonl"
 printf '%s\n' '{"id":"n1","kind":"node","node_type":"Claim","label":"reload claim","source_ids":["s1"],"claim_status":"hypothesis","confidence":"low"}' > "$reload_data/nodes.jsonl"
+printf '%s\n' '{"id":"n1","kind":"node","node_type":"Claim","label":"must not replace","source_ids":["s1"],"claim_status":"hypothesis","confidence":"low"}' >> "$reload_data/nodes.jsonl"
 printf '%s\n' '{"id":"ghost-node","kind":"node","node_type":"Claim","label":"must be ignored","source_ids":["missing"],"claim_status":"hypothesis","confidence":"low"}' >> "$reload_data/nodes.jsonl"
 printf '%s\n' '{"id":"duplicate-citation","kind":"node","node_type":"Claim","label":"must be ignored","source_ids":["s1","s1"],"claim_status":"hypothesis","confidence":"low"}' >> "$reload_data/nodes.jsonl"
 printf '%s\n' '{"id":"e1","kind":"edge","from":"n1","to":"n1","relation":"supports","source_ids":["s1"]}' > "$reload_data/edges.jsonl"
+printf '%s\n' '{"id":"e1","kind":"edge","from":"n1","to":"n1","relation":"contradicts","source_ids":["s1"]}' >> "$reload_data/edges.jsonl"
 printf '%s\n' '{"id":"eghost","kind":"edge","from":"n1","to":"ghost-node","relation":"supports","source_ids":["s1"]}' >> "$reload_data/edges.jsonl"
 printf '%s\n' '{"id":"eunknown-source","kind":"edge","from":"n1","to":"n1","relation":"supports","source_ids":["missing"]}' >> "$reload_data/edges.jsonl"
 out=$(call_data "$reload_data" '{"jsonrpc":"2.0","id":85,"method":"tools/call","params":{"name":"traverse_graph","arguments":{"node_id":"n1"}}}')
 printf '%s\n' "$out" | grep 'e1' >/dev/null
-if printf '%s\n' "$out" | grep 'eghost\|ghost-node\|eunknown-source' >/dev/null; then exit 1; fi
+printf '%s\n' "$out" | grep 'reload claim' >/dev/null
+if printf '%s\n' "$out" | grep 'must not replace\|"relation":"contradicts"\|eghost\|ghost-node\|eunknown-source' >/dev/null; then exit 1; fi
 out=$(call_data "$reload_data" '{"jsonrpc":"2.0","id":86,"method":"tools/call","params":{"name":"search_sources","arguments":{}}}')
-printf '%s\n' "$out" | grep 'count.*1' >/dev/null
+printf '%s\n' "$out" | grep 'count.*2' >/dev/null
 if printf '%s\n' "$out" | grep 'must be ignored' >/dev/null; then exit 1; fi
+out=$(call_data "$reload_data" '{"jsonrpc":"2.0","id":861,"method":"tools/call","params":{"name":"search_sources","arguments":{"query":"first source"}}}')
+printf '%s\n' "$out" | grep 'first source' >/dev/null
+if printf '%s\n' "$out" | grep 'second source' >/dev/null; then exit 1; fi
+
+unicode_rebuild_data="$tmp/unicode-rebuild-data"
+mkdir -p "$unicode_rebuild_data"
+printf '%s\n' '{"id":"s-\u00e9","kind":"source","title":"escaped source","reference":"escaped.md","source_type":"paper","project":"unicode","status":"unverified"}' > "$unicode_rebuild_data/sources.jsonl"
+printf '%s\n' '{ "kind":"node", "id":"source-s-\u00e9", "claim_status":"source-material", "confidence":"not-asserted", "node_type":"Source", "label":"escaped source", "source_ids":["s-\u00e9"], "reference":"escaped.md", "status":"unverified" }' > "$unicode_rebuild_data/nodes.jsonl"
+before=$(wc -l < "$unicode_rebuild_data/nodes.jsonl")
+call_data "$unicode_rebuild_data" '{"jsonrpc":"2.0","id":862,"method":"tools/call","params":{"name":"rebuild_graph","arguments":{}}}' >/dev/null
+after=$(wc -l < "$unicode_rebuild_data/nodes.jsonl")
+[ "$before" -eq "$after" ]
 
 malformed_lock_data="$tmp/malformed-lock-data"
 mkdir -p "$malformed_lock_data"

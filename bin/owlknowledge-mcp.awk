@@ -11,7 +11,9 @@ BEGIN {
     MAX_IDENTIFIER_TEXT = 256
     MAX_SOURCE_IDENTIFIER_TEXT = 249
     MAX_REQUEST_TEXT = 65536
+    MAX_RESPONSE_TEXT = 32768
     REQUEST_NOTIFICATION = 0
+    SHUTDOWN_REQUESTED = 0
     load_sources(); load_nodes(); load_edges()
 }
 
@@ -96,7 +98,7 @@ function json_decode(s, i, c, out, hex, n, low_hex, low) {
                 hex = substr(s, i + 1, 4); n = hex_value(hex)
                 if (n >= 55296 && n <= 56319 && substr(s, i + 5, 2) == "\\u") {
                     low_hex = substr(s, i + 7, 4); low = hex_value(low_hex)
-                    if (low >= 56320 && low <= 57343) { n = 65536 + (n - 55296) * 1024 + low - 56320; out = out sprintf("%c", n); i += 10 }
+                    if (low >= 56320 && low <= 57343) { n = 65536 + (n - 55296) * 1024 + low - 56320; out = out utf8_encode(n); i += 10 }
                     else { out = out "\\u" hex; i += 4 }
                 } else if (n >= 55296 && n <= 57343) { out = out "\\u" hex; i += 4 }
                 else if (n == 8) { out = out "\b"; i += 4 }
@@ -105,13 +107,20 @@ function json_decode(s, i, c, out, hex, n, low_hex, low) {
                 else if (n == 12) { out = out "\f"; i += 4 }
                 else if (n == 13) { out = out "\r"; i += 4 }
                 else if (n < 32) { out = out "\\u" hex; i += 4 }
-                else { out = out sprintf("%c", n); i += 4 }
+                else { out = out utf8_encode(n); i += 4 }
             } else out = out c
         } else if (c == "\"") return out
         else out = out c
         i++
     }
     return out
+}
+
+function utf8_encode(n) {
+    if (n < 128) return sprintf("%c", n)
+    if (n < 2048) return sprintf("%c%c", 192 + int(n / 64), 128 + (n % 64))
+    if (n < 65536) return sprintf("%c%c%c", 224 + int(n / 4096), 128 + (int(n / 64) % 64), 128 + (n % 64))
+    return sprintf("%c%c%c%c", 240 + int(n / 262144), 128 + (int(n / 4096) % 64), 128 + (int(n / 64) % 64), 128 + (n % 64))
 }
 
 function hex_value(s, i, c, p, n) {
@@ -285,7 +294,9 @@ function bounded_string_array(raw, i, start, e, count, item, value, list) {
 function load_sources(line, id) {
     while ((getline line < source_file) > 0) if (valid_json(line) && persisted_source(line)) {
         object_get(line, "id")
-        id = GET_STRING; source_json[id] = line
+        id = GET_STRING
+        if (id in source_json) continue
+        source_json[id] = line
         object_get(line, "title"); source_title[id] = GET_STRING
         object_get(line, "reference"); source_reference[id] = GET_STRING
         object_get(line, "source_type"); source_kind[id] = GET_STRING
@@ -301,7 +312,9 @@ function load_sources(line, id) {
 function load_nodes(line, id) {
     while ((getline line < node_file) > 0) if (valid_json(line) && persisted_node(line)) {
         object_get(line, "id")
-        id = GET_STRING; node_json[id] = line
+        id = GET_STRING
+        if (id in node_json) continue
+        node_json[id] = line
         object_get(line, "node_type"); node_type[id] = GET_STRING
         object_get(line, "label"); node_label[id] = GET_STRING
         object_get(line, "source_ids"); node_sources[id] = GET_RAW
@@ -319,7 +332,9 @@ function load_nodes(line, id) {
 function load_edges(line, id) {
     while ((getline line < edge_file) > 0) if (valid_json(line) && persisted_edge(line)) {
         object_get(line, "id")
-        id = GET_STRING; edge_json[id] = line
+        id = GET_STRING
+        if (id in edge_json) continue
+        edge_json[id] = line
         object_get(line, "from"); edge_from[id] = GET_STRING
         object_get(line, "to"); edge_to[id] = GET_STRING
         object_get(line, "relation"); edge_relation[id] = GET_STRING
@@ -330,14 +345,24 @@ function load_edges(line, id) {
     close(edge_file)
 }
 
-function next_id(prefix) { sequence++; return prefix "-" systime() "-" sequence }
+function generated_id_in_use(prefix, candidate) {
+    if (prefix == "src") return (candidate in source_json) || (("source-" candidate) in node_json)
+    if (prefix == "edge") return candidate in edge_json
+    return 0
+}
+
+function next_id(prefix, candidate) {
+    do { sequence++; candidate = prefix "-" systime() "-" sequence } while (generated_id_in_use(prefix, candidate))
+    return candidate
+}
 function append_record(file, record) { print record >> file; close(file) }
 function fail(message) { TOOL_ERROR = message; return 0 }
 function required_string(obj, name, label) { object_get(obj, name); if (!GET_PRESENT || substr(GET_RAW, 1, 1) != "\"") return fail(label " requires string argument '" name "'"); return 1 }
 function required_nonempty_string(obj, name, label) { if (!required_string(obj, name, label)) return 0; if (GET_STRING ~ /^[[:space:]]*$/) return fail(label " requires a non-empty string argument '" name "'"); return 1 }
-function valid_identifier(value, label) { if (value == "") return fail(label " requires a non-empty identifier"); if (length(value) > MAX_IDENTIFIER_TEXT) return fail(label " identifier exceeds " MAX_IDENTIFIER_TEXT " characters"); return 1 }
+function valid_identifier(value, label) { if (value == "" || value ~ /^[[:space:]]*$/) return fail(label " requires a non-empty identifier"); if (length(value) > MAX_IDENTIFIER_TEXT) return fail(label " identifier exceeds " MAX_IDENTIFIER_TEXT " characters"); return 1 }
 function valid_source_identifier(value, label) { if (!valid_identifier(value, label)) return 0; if (length(value) > MAX_SOURCE_IDENTIFIER_TEXT) return fail(label " identifier exceeds " MAX_SOURCE_IDENTIFIER_TEXT " characters because its derived Source node id must fit the graph limit"); return 1 }
 function optional_string(obj, name, default_value, label) { object_get(obj, name); if (GET_PRESENT && substr(GET_RAW, 1, 1) != "\"") { fail(label " requires string argument '" name "'"); return default_value }; if (GET_PRESENT) return GET_STRING; return default_value }
+function optional_nonempty_string(obj, name, default_value, label) { object_get(obj, name); if (!GET_PRESENT) return default_value; if (substr(GET_RAW, 1, 1) != "\"" || GET_STRING ~ /^[[:space:]]*$/) { fail(label " requires a non-empty string argument '" name "'"); return default_value }; return GET_STRING }
 function required_raw(obj, name, label) { object_get(obj, name); if (!GET_PRESENT || GET_RAW == "null") return fail(label " requires argument '" name "'"); return GET_RAW }
 function array_or_empty(obj, name, label, raw) { object_get(obj, name); raw = (GET_PRESENT ? GET_RAW : "[]"); if (substr(raw, 1, 1) != "[" || !valid_json(raw)) { fail(label " '" name "' must be a valid JSON array"); return "" }; return raw }
 function bounded_limit(obj, name, default_value, raw, value) { object_get(obj, name); value = default_value; if (GET_PRESENT && GET_RAW !~ /^[0-9]+$/) { fail("requires a positive integer argument '" name "'"); return default_value }; if (GET_PRESENT) value = GET_RAW + 0; if (GET_PRESENT && value < 1) { fail("requires a positive integer argument '" name "'"); return default_value }; if (value < 1) value = 1; if (value > MAX_CONTEXT_ITEMS) value = MAX_CONTEXT_ITEMS; return value }
@@ -366,6 +391,14 @@ function persisted_source_ids(obj, name, raw, i, start, e, item) {
     }
     return 0
 }
+function source_ids_match(raw, expected, i, start, e, item) {
+    if (substr(raw, 1, 1) != "[" || !valid_json(raw)) return 0
+    i = ws(raw, 2); start = i; e = value_end(raw, start)
+    if (e < start || substr(raw, start, 1) != "\"") return 0
+    item = json_decode(substr(raw, start, e - start + 1)); if (item != expected) return 0
+    i = ws(raw, e + 1)
+    return substr(raw, i, 1) == "]"
+}
 function persisted_json_optional(obj, name, raw) { object_get(obj, name); raw = (GET_PRESENT ? GET_RAW : ""); return raw == "" || valid_json(raw) }
 function persisted_source(obj) { return persisted_kind(obj, "source") && persisted_source_identifier(obj, "id") && persisted_string(obj, "title", 1) && persisted_string(obj, "reference", 1) && persisted_string(obj, "source_type", 1) && persisted_string(obj, "project", 1) && persisted_string(obj, "status", 1) && persisted_optional_string(obj, "uncertainty") && persisted_optional_string(obj, "notes") }
 function persisted_node(obj, id, source_id, node_type_value, claim_status, confidence, source_ids) {
@@ -378,8 +411,12 @@ function persisted_node(obj, id, source_id, node_type_value, claim_status, confi
     object_get(obj, "claim_status"); claim_status = GET_STRING
     object_get(obj, "confidence"); confidence = GET_STRING
     object_get(obj, "source_ids"); source_ids = GET_RAW
-    return node_type_value == "Source" && claim_status == "source-material" && confidence == "not-asserted" && source_ids == "[" json_escape(source_id) "]"
+    return node_type_value == "Source" && claim_status == "source-material" && confidence == "not-asserted" && source_ids_match(source_ids, source_id)
 }
+function source_node_matches(id, source_id) {
+    return node_type[id] == "Source" && node_claim_status[id] == "source-material" && node_confidence[id] == "not-asserted" && node_label[id] == source_title[source_id] && node_sources_match(node_sources[id], source_id) && node_reference[id] == source_reference[source_id] && node_status[id] == source_status[source_id] && node_uncertainty[id] == source_uncertainty[source_id]
+}
+function node_sources_match(raw, expected) { return source_ids_match(raw, expected) }
 function persisted_edge(obj, id, from, to, relation) {
     if (!(persisted_kind(obj, "edge") && persisted_identifier(obj, "id") && persisted_identifier(obj, "from") && persisted_identifier(obj, "to") && persisted_identifier(obj, "relation") && persisted_source_ids(obj, "source_ids") && persisted_json_optional(obj, "evidence"))) return 0
     object_get(obj, "id"); id = GET_STRING
@@ -465,6 +502,7 @@ function handle_request(line, method, id_present, params) {
     REQUEST_NOTIFICATION = 0
     if (length(line) > MAX_REQUEST_TEXT) { ID_RAW = "null"; rpc_error(-32600, "request exceeds " MAX_REQUEST_TEXT " characters"); return }
     if (!valid_json(line)) { ID_RAW = "null"; rpc_error(-32700, "parse error"); return }
+    object_get(line, "id"); REQUEST_NOTIFICATION = !GET_PRESENT
     object_get(line, "jsonrpc")
     if (!GET_PRESENT || GET_RAW != "\"2.0\"") { ID_RAW = "null"; rpc_error(-32600, "request requires jsonrpc 2.0"); return }
     ID_RAW = "null"; object_get(line, "id"); id_present = GET_PRESENT; if (id_present) ID_RAW = GET_RAW
@@ -476,19 +514,21 @@ function handle_request(line, method, id_present, params) {
     object_get(line, "params")
     if (GET_PRESENT && substr(GET_RAW, 1, 1) != "{" && substr(GET_RAW, 1, 1) != "[") { if (id_present) rpc_error(-32600, "request params must be an object or array"); return }
     if (method == "notifications/initialized" || method == "notifications/cancelled") return
+    if (method == "exit") exit 0
+    if (SHUTDOWN_REQUESTED) { if (id_present) rpc_error(-32600, "server is shutting down"); return }
     if (method == "initialize") { rpc_result("{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{},\"resources\":{\"subscribe\":false,\"listChanged\":false}},\"serverInfo\":{\"name\":\"owlknowledge\",\"version\":\"0.1.0\"}}"); return }
     if (method == "ping") { rpc_result("{}"); return }
     if (method == "tools/list") { rpc_result(tools_json()); return }
     if (method == "resources/list") { rpc_result(resources_json()); return }
     if (method == "resources/read") { object_get(line, "params"); params = (GET_PRESENT ? GET_RAW : "{}"); resource_read(params); return }
     if (method == "tools/call") { object_get(line, "params"); params = (GET_PRESENT ? GET_RAW : "{}"); tool_call(params); return }
-    if (method == "shutdown") { rpc_result("null"); return }
+    if (method == "shutdown") { SHUTDOWN_REQUESTED = 1; rpc_result("null"); return }
     if (id_present) rpc_error(-32601, "method not found: " method)
 }
 
 function rpc_result(result) { if (REQUEST_NOTIFICATION) return; print "{\"jsonrpc\":\"2.0\",\"id\":" ID_RAW ",\"result\":" result "}"; fflush() }
 function rpc_error(code, message) { if (REQUEST_NOTIFICATION) return; print "{\"jsonrpc\":\"2.0\",\"id\":" ID_RAW ",\"error\":{\"code\":" code ",\"message\":" json_escape(message) "}}"; fflush() }
-function tool_text(message, is_error) { if (REQUEST_NOTIFICATION) return; print "{\"jsonrpc\":\"2.0\",\"id\":" ID_RAW ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":" json_escape(message) "}]" (is_error ? ",\"isError\":true" : "") "}}"; fflush() }
+function tool_text(message, is_error) { if (REQUEST_NOTIFICATION) return; if (length(message) > MAX_RESPONSE_TEXT) message = "{\"truncated\":true,\"bytes\":" length(message) "}"; print "{\"jsonrpc\":\"2.0\",\"id\":" ID_RAW ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":" json_escape(message) "}]" (is_error ? ",\"isError\":true" : "") "}}"; fflush() }
 
 function tools_json() {
     return "{\"tools\":[" \
@@ -538,8 +578,8 @@ function register_source(args, title, reference, source_type_value, project, sta
     if (!required_nonempty_string(args, "title", "register_source")) return; title = GET_STRING
     if (!required_nonempty_string(args, "reference", "register_source")) return; reference = GET_STRING
     if (!required_nonempty_string(args, "source_type", "register_source")) return; source_type_value = GET_STRING
-    project = optional_string(args, "project", "current", "register_source"); if (TOOL_ERROR != "") return
-    status = optional_string(args, "status", "unverified", "register_source"); if (TOOL_ERROR != "") return
+    project = optional_nonempty_string(args, "project", "current", "register_source"); if (TOOL_ERROR != "") return
+    status = optional_nonempty_string(args, "status", "unverified", "register_source"); if (TOOL_ERROR != "") return
     uncertainty = optional_string(args, "uncertainty", "", "register_source"); if (TOOL_ERROR != "") return
     notes = optional_string(args, "notes", "", "register_source"); if (TOOL_ERROR != "") return
     id = optional_string(args, "source_id", "", "register_source"); if (TOOL_ERROR != "") return
@@ -576,8 +616,8 @@ function add_node(args, id, node_type_value, label, source_ids, description, cla
     object_get(args, "source_ids"); source_ids = (GET_PRESENT ? GET_RAW : "[]"); if (substr(source_ids, 1, 1) != "[") { fail("add_node source_ids must be an array"); return }
     if (!validate_source_ids(source_ids, "add_node source_ids")) return
     description = optional_string(args, "description", "", "add_node"); if (TOOL_ERROR != "") return
-    claim_status = optional_string(args, "claim_status", "uncertain", "add_node"); if (TOOL_ERROR != "") return
-    confidence = optional_string(args, "confidence", "unassessed", "add_node"); if (TOOL_ERROR != "") return
+    claim_status = optional_nonempty_string(args, "claim_status", "uncertain", "add_node"); if (TOOL_ERROR != "") return
+    confidence = optional_nonempty_string(args, "confidence", "unassessed", "add_node"); if (TOOL_ERROR != "") return
     record = "{\"id\":" json_escape(id) ",\"kind\":\"node\",\"node_type\":" json_escape(node_type_value) ",\"label\":" json_escape(label) ",\"source_ids\":" source_ids ",\"claim_status\":" json_escape(claim_status) ",\"confidence\":" json_escape(confidence)
     if (description != "") record = record ",\"description\":" json_escape(description)
     record = record "}"
@@ -613,7 +653,7 @@ function rebuild_graph(id, node_id, record, count) {
     while ((id = next_source(rebuild_used, "", "")) != "") {
         rebuild_used[id] = 1
         node_id = "source-" id
-        if ((node_id in node_json) && !(node_type[node_id] == "Source" && node_claim_status[node_id] == "source-material" && node_sources[node_id] == "[" json_escape(id) "]")) {
+        if ((node_id in node_json) && !source_node_matches(node_id, id)) {
             fail("cannot rebuild source node; id conflicts with existing graph node: " node_id)
             return
         }
@@ -626,7 +666,7 @@ function rebuild_graph(id, node_id, record, count) {
         record = "{\"id\":" json_escape(node_id) ",\"kind\":\"node\",\"node_type\":\"Source\",\"label\":" json_escape(source_title[id]) ",\"source_ids\":[" json_escape(id) "],\"reference\":" json_escape(source_reference[id]) ",\"claim_status\":\"source-material\",\"confidence\":\"not-asserted\",\"status\":" json_escape(source_status[id])
         if (source_uncertainty[id] != "") record = record ",\"uncertainty\":" json_escape(source_uncertainty[id])
         record = record "}"
-        if (!(node_id in node_json) || node_json[node_id] != record) append_record(node_file, record)
+        if (!(node_id in node_json) || !source_node_matches(node_id, id)) append_record(node_file, record)
         node_json[node_id] = record; node_type[node_id] = "Source"; node_label[node_id] = source_title[id]; node_sources[node_id] = "[" json_escape(id) "]"; node_claim_status[node_id] = "source-material"; node_confidence[node_id] = "not-asserted"; node_description[node_id] = ""; node_reference[node_id] = source_reference[id]; node_status[node_id] = source_status[id]; node_uncertainty[node_id] = source_uncertainty[id]; node_search[node_id] = tolower("source " source_title[id] " " source_reference[id]); count++
     }
     tool_text("{\"rebuilt\":true,\"source_count\":" length_source() ",\"source_nodes\":" count ",\"preserved_derived_graph\":true,\"graph_note\":\"Source nodes were refreshed; interpreted nodes and relations remain intact.\"}")
