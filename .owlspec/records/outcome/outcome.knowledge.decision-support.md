@@ -10,6 +10,10 @@ to = "constraint.boundary.decision-material"
 [[relations]]
 type = "constrained_by"
 to = "constraint.source.uncertainty-preserved"
+
+[[relations]]
+type = "verified_by"
+to = "verification.knowledge.decision-trace"
 +++
 
 # Sourceの関係を辿って意思決定を支援できる

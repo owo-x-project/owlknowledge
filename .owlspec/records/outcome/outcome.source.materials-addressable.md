@@ -2,6 +2,10 @@
 version = 2
 id = "outcome.source.materials-addressable"
 kind = "outcome"
+
+[[relations]]
+type = "verified_by"
+to = "verification.knowledge.source-materials"
 +++
 
 # 多様な判断材料を同じ知識構造から扱える

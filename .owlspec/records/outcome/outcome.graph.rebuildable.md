@@ -6,6 +6,10 @@ kind = "outcome"
 [[relations]]
 type = "constrained_by"
 to = "constraint.graph.rebuildable"
+
+[[relations]]
+type = "verified_by"
+to = "verification.knowledge.rebuildable-graph"
 +++
 
 # Sourceを失わずにGraphを更新・再構築できる

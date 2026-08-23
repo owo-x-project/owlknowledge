@@ -10,6 +10,10 @@ to = "constraint.graph.rebuildable"
 [[relations]]
 type = "constrained_by"
 to = "constraint.source.uncertainty-preserved"
+
+[[relations]]
+type = "verified_by"
+to = "verification.knowledge.graph-evolution"
 +++
 
 # 資料が増えるほど理解構造が成長する

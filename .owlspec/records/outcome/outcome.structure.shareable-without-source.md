@@ -6,6 +6,10 @@ kind = "outcome"
 [[relations]]
 type = "constrained_by"
 to = "constraint.project.independence"
+
+[[relations]]
+type = "verified_by"
+to = "verification.knowledge.structure-sharing"
 +++
 
 # 有効なKnowledge構造をSource内容なしに転用できる
