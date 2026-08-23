@@ -34,6 +34,9 @@ printf '%s\n' "$out" | grep 'claim-a' >/dev/null
 out=$(call '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"add_node","arguments":{"node_id":"claim-b","node_type":"Claim","label":"PostgreSQL is faster","source_ids":["experiment-b"],"claim_status":"hypothesis","confidence":"low"}}}')
 printf '%s\n' "$out" | grep 'claim-b' >/dev/null
 
+out=$(call '{"jsonrpc":"2.0","id":811,"method":"tools/call","params":{"name":"add_node","arguments":{"node_id":"claim-b","node_type":"Claim","label":"duplicate","source_ids":["experiment-b"]}}}')
+printf '%s\n' "$out" | grep 'node already exists' >/dev/null
+
 long_description=$(awk 'BEGIN { for (i = 1; i <= 600; i++) printf "x" }')
 out=$(call "{\"jsonrpc\":\"2.0\",\"id\":81,\"method\":\"tools/call\",\"params\":{\"name\":\"add_node\",\"arguments\":{\"node_id\":\"claim-long\",\"node_type\":\"Claim\",\"label\":\"Long claim\",\"source_ids\":[\"paper-a\"],\"claim_status\":\"hypothesis\",\"confidence\":\"low\",\"description\":\"$long_description\"}}}")
 printf '%s\n' "$out" | grep 'description_truncated.*true' >/dev/null
@@ -44,11 +47,18 @@ printf '%s\n' "$out" | grep 'edge-a' >/dev/null
 out=$(call '{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"add_edge","arguments":{"edge_id":"edge-b","from":"claim-a","to":"claim-b","relation":"contradicts","source_ids":["paper-a","experiment-b"],"evidence":{"benchmark":"omit from bounded context"}}}}')
 printf '%s\n' "$out" | grep 'contradicts' >/dev/null
 
+out=$(call '{"jsonrpc":"2.0","id":101,"method":"tools/call","params":{"name":"add_edge","arguments":{"edge_id":"edge-bad-json","from":"claim-a","to":"claim-b","relation":"related-to","evidence":{"broken":}}}}')
+printf '%s\n' "$out" | grep 'evidence must be valid JSON' >/dev/null
+
 out=$(call '{"jsonrpc":"2.0","id":82,"method":"tools/call","params":{"name":"add_edge","arguments":{"edge_id":"edge-long","from":"claim-a","to":"claim-long","relation":"related-to","source_ids":["paper-a"]}}}')
 printf '%s\n' "$out" | grep 'edge-long' >/dev/null
 
 out=$(call '{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"rebuild_graph","arguments":{}}}')
 printf '%s\n' "$out" | grep 'preserved_derived_graph' >/dev/null
+before=$(wc -l < "$tmp/data/nodes.jsonl")
+call '{"jsonrpc":"2.0","id":111,"method":"tools/call","params":{"name":"rebuild_graph","arguments":{}}}' >/dev/null
+after=$(wc -l < "$tmp/data/nodes.jsonl")
+if [ "$before" -ne "$after" ]; then exit 1; fi
 
 out=$(call '{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"traverse_graph","arguments":{"node_id":"claim-a"}}}')
 printf '%s\n' "$out" | grep 'SQLite paper' >/dev/null
@@ -105,6 +115,13 @@ done
 out=$(call '{"jsonrpc":"2.0","id":80,"method":"tools/call","params":{"name":"search_sources","arguments":{"query":"Bounded source","limit":999999}}}')
 printf '%s\n' "$out" | grep 'count.*20' >/dev/null
 printf '%s\n' "$out" | grep 'truncated.*true' >/dev/null
+
+long_source=$(awk 'BEGIN { for (i = 1; i <= 6000; i++) printf "x" }')
+call "{\"jsonrpc\":\"2.0\",\"id\":81,\"method\":\"tools/call\",\"params\":{\"name\":\"register_source\",\"arguments\":{\"source_id\":\"source-long\",\"title\":\"$long_source\",\"reference\":\"$long_source\",\"source_type\":\"paper\",\"notes\":\"$long_source\"}}}" >/dev/null
+out=$(call '{"jsonrpc":"2.0","id":82,"method":"tools/call","params":{"name":"search_sources","arguments":{"query":"xxxxxxxx"}}}')
+printf '%s\n' "$out" | grep 'title_truncated.*true' >/dev/null
+printf '%s\n' "$out" | grep 'reference_truncated.*true' >/dev/null
+if [ "$(printf '%s\n' "$out" | wc -c)" -gt 3000 ]; then exit 1; fi
 
 if grep 'orphan-claim' "$tmp/data/nodes.jsonl" >/dev/null; then exit 1; fi
 if grep 'orphan-edge' "$tmp/data/edges.jsonl" >/dev/null; then exit 1; fi
