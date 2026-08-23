@@ -7,6 +7,7 @@ BEGIN {
     edge_file = data_dir "/edges.jsonl"
     sequence = 0
     MAX_CONTEXT_ITEMS = 20
+    MAX_CONTEXT_TEXT = 512
     load_sources(); load_nodes(); load_edges()
 }
 
@@ -149,6 +150,12 @@ function load_nodes(line, id) {
         object_get(line, "node_type"); node_type[id] = GET_STRING
         object_get(line, "label"); node_label[id] = GET_STRING
         object_get(line, "source_ids"); node_sources[id] = GET_RAW
+        object_get(line, "claim_status"); node_claim_status[id] = GET_STRING
+        object_get(line, "confidence"); node_confidence[id] = GET_STRING
+        object_get(line, "description"); node_description[id] = GET_STRING
+        object_get(line, "reference"); node_reference[id] = GET_STRING
+        object_get(line, "status"); node_status[id] = GET_STRING
+        object_get(line, "uncertainty"); node_uncertainty[id] = GET_STRING
         node_search[id] = tolower(node_type[id] " " node_label[id] " " line); sequence++
     }
     close(node_file)
@@ -159,7 +166,10 @@ function load_edges(line, id) {
         id = GET_STRING; edge_json[id] = line
         object_get(line, "from"); edge_from[id] = GET_STRING
         object_get(line, "to"); edge_to[id] = GET_STRING
-        object_get(line, "relation"); edge_relation[id] = GET_STRING; sequence++
+        object_get(line, "relation"); edge_relation[id] = GET_STRING
+        object_get(line, "source_ids"); edge_sources[id] = (GET_PRESENT ? GET_RAW : "[]")
+        object_get(line, "evidence"); edge_has_evidence[id] = GET_PRESENT && GET_RAW != "null"
+        sequence++
     }
     close(edge_file)
 }
@@ -212,6 +222,23 @@ function next_key(used, values, best, key) {
     best = ""
     for (key in values) if (!(key in used) && (best == "" || key < best)) best = key
     return best
+}
+
+function node_summary(id, out, description) {
+    out = "{\"id\":" json_escape(id) ",\"kind\":\"node\",\"node_type\":" json_escape(node_type[id]) ",\"label\":" json_escape(node_label[id]) ",\"source_ids\":" node_sources[id] ",\"claim_status\":" json_escape(node_claim_status[id]) ",\"confidence\":" json_escape(node_confidence[id])
+    if (node_reference[id] != "") out = out ",\"reference\":" json_escape(node_reference[id])
+    if (node_status[id] != "") out = out ",\"status\":" json_escape(node_status[id])
+    if (node_uncertainty[id] != "") out = out ",\"uncertainty\":" json_escape(node_uncertainty[id])
+    if (node_description[id] != "") {
+        description = substr(node_description[id], 1, MAX_CONTEXT_TEXT)
+        out = out ",\"description\":" json_escape(description)
+        if (length(node_description[id]) > MAX_CONTEXT_TEXT) out = out ",\"description_truncated\":true"
+    }
+    return out "}"
+}
+
+function edge_summary(id) {
+    return "{\"id\":" json_escape(id) ",\"kind\":\"edge\",\"from\":" json_escape(edge_from[id]) ",\"to\":" json_escape(edge_to[id]) ",\"relation\":" json_escape(edge_relation[id]) ",\"source_ids\":" edge_sources[id] ",\"has_evidence\":" (edge_has_evidence[id] ? "true" : "false") "}"
 }
 
 function handle_request(line, method, id_present, params) {
@@ -312,8 +339,8 @@ function add_node(args, id, node_type_value, label, source_ids, description, cla
     record = "{\"id\":" json_escape(id) ",\"kind\":\"node\",\"node_type\":" json_escape(node_type_value) ",\"label\":" json_escape(label) ",\"source_ids\":" source_ids ",\"claim_status\":" json_escape(claim_status) ",\"confidence\":" json_escape(confidence)
     if (description != "") record = record ",\"description\":" json_escape(description)
     record = record "}"
-    append_record(node_file, record); node_json[id] = record; node_type[id] = node_type_value; node_label[id] = label; node_sources[id] = source_ids; node_search[id] = tolower(node_type_value " " label " " record)
-    tool_text("Added derived graph node " id ".\n" record)
+    append_record(node_file, record); node_json[id] = record; node_type[id] = node_type_value; node_label[id] = label; node_sources[id] = source_ids; node_claim_status[id] = claim_status; node_confidence[id] = confidence; node_description[id] = description; node_reference[id] = ""; node_status[id] = ""; node_uncertainty[id] = ""; node_search[id] = tolower(node_type_value " " label " " record)
+    tool_text("Added derived graph node " id ".\n" node_summary(id))
 }
 
 function add_edge(args, from, to, relation, source_ids, evidence, id, record) {
@@ -329,8 +356,8 @@ function add_edge(args, from, to, relation, source_ids, evidence, id, record) {
     record = "{\"id\":" json_escape(id) ",\"kind\":\"edge\",\"from\":" json_escape(from) ",\"to\":" json_escape(to) ",\"relation\":" json_escape(relation) ",\"source_ids\":" source_ids
     if (evidence != "null") record = record ",\"evidence\":" evidence
     record = record "}"
-    append_record(edge_file, record); edge_json[id] = record; edge_from[id] = from; edge_to[id] = to; edge_relation[id] = relation
-    tool_text("Added derived relation " id ".\n" record)
+    append_record(edge_file, record); edge_json[id] = record; edge_from[id] = from; edge_to[id] = to; edge_relation[id] = relation; edge_sources[id] = source_ids; edge_has_evidence[id] = (evidence != "null")
+    tool_text("Added derived relation " id ".\n" edge_summary(id))
 }
 
 function rebuild_graph(id, node_id, record, count) {
@@ -342,7 +369,7 @@ function rebuild_graph(id, node_id, record, count) {
         record = "{\"id\":" json_escape(node_id) ",\"kind\":\"node\",\"node_type\":\"Source\",\"label\":" json_escape(source_title[id]) ",\"source_ids\":[" json_escape(id) "],\"reference\":" json_escape(source_reference[id]) ",\"claim_status\":\"source-material\",\"confidence\":\"not-asserted\",\"status\":" json_escape(source_status[id])
         if (source_uncertainty[id] != "") record = record ",\"uncertainty\":" json_escape(source_uncertainty[id])
         record = record "}"
-        append_record(node_file, record); node_json[node_id] = record; node_type[node_id] = "Source"; node_label[node_id] = source_title[id]; node_sources[node_id] = "[" json_escape(id) "]"; node_search[node_id] = tolower("source " source_title[id] " " source_reference[id]); count++
+        append_record(node_file, record); node_json[node_id] = record; node_type[node_id] = "Source"; node_label[node_id] = source_title[id]; node_sources[node_id] = "[" json_escape(id) "]"; node_claim_status[node_id] = "source-material"; node_confidence[node_id] = "not-asserted"; node_description[node_id] = ""; node_reference[node_id] = source_reference[id]; node_status[node_id] = source_status[id]; node_uncertainty[node_id] = source_uncertainty[id]; node_search[node_id] = tolower("source " source_title[id] " " source_reference[id]); count++
     }
     tool_text("{\"rebuilt\":true,\"source_count\":" length_source() ",\"source_nodes\":" count ",\"preserved_derived_graph\":true,\"graph_note\":\"Source nodes were refreshed; interpreted nodes and relations remain intact.\"}")
 }
@@ -358,11 +385,11 @@ function traverse_graph(args, id, relation, eid, list_edges, list_nodes, count_e
     while (count_edges < limit && (eid = next_related_edge(traverse_used, id, relation)) != "") {
         traverse_used[eid] = 1
         if (edge_from[eid] == id) other = edge_to[eid]; else other = edge_from[eid]
-        if (count_edges > 0) list_edges = list_edges ","; list_edges = list_edges edge_json[eid]; count_edges++
-        if (count_nodes > 0) list_nodes = list_nodes ","; list_nodes = list_nodes node_json[other]; count_nodes++
+        if (count_edges > 0) list_edges = list_edges ","; list_edges = list_edges edge_summary(eid); count_edges++
+        if (count_nodes > 0) list_nodes = list_nodes ","; list_nodes = list_nodes node_summary(other); count_nodes++
     }
     if (next_related_edge(traverse_used, id, relation) != "") truncated = 1
-    tool_text("{\"node\":" node_json[id] ",\"edges\":" list_edges "] ,\"related_nodes\":" list_nodes "] ,\"truncated\":" (truncated ? "true" : "false") "}")
+    tool_text("{\"node\":" node_summary(id) ",\"edges\":" list_edges "] ,\"related_nodes\":" list_nodes "] ,\"truncated\":" (truncated ? "true" : "false") "}")
 }
 
 function structure_payload(id, types, relations, type_list, relation_list, type_count, relation_count, e, t, r, out) {

@@ -8,4 +8,4 @@ target = "test/run.sh"
 
 # Verify decision-material tracing
 
-Run `./test/run.sh`. The scenario connects source-linked claims with supports and contradicts relations, traverses them back to source references in stable edge order, and hard-caps oversized traversal requests at 20 related edges while reporting truncation.
+Run `./test/run.sh`. The scenario connects source-linked claims with supports and contradicts relations, traverses them back to source references in stable edge order, and hard-caps oversized traversal requests at 20 related edges while reporting truncation. Traversal preserves source references, claim state, and bounded node/edge provenance while omitting arbitrary edge evidence from the compact response.

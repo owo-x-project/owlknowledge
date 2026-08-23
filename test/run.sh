@@ -34,18 +34,28 @@ printf '%s\n' "$out" | grep 'claim-a' >/dev/null
 out=$(call '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"add_node","arguments":{"node_id":"claim-b","node_type":"Claim","label":"PostgreSQL is faster","source_ids":["experiment-b"],"claim_status":"hypothesis","confidence":"low"}}}')
 printf '%s\n' "$out" | grep 'claim-b' >/dev/null
 
+long_description=$(awk 'BEGIN { for (i = 1; i <= 600; i++) printf "x" }')
+out=$(call "{\"jsonrpc\":\"2.0\",\"id\":81,\"method\":\"tools/call\",\"params\":{\"name\":\"add_node\",\"arguments\":{\"node_id\":\"claim-long\",\"node_type\":\"Claim\",\"label\":\"Long claim\",\"source_ids\":[\"paper-a\"],\"claim_status\":\"hypothesis\",\"confidence\":\"low\",\"description\":\"$long_description\"}}}")
+printf '%s\n' "$out" | grep 'description_truncated.*true' >/dev/null
+
 out=$(call '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"add_edge","arguments":{"edge_id":"edge-a","from":"source-paper-a","to":"claim-a","relation":"supports","source_ids":["paper-a"]}}}')
 printf '%s\n' "$out" | grep 'edge-a' >/dev/null
 
-out=$(call '{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"add_edge","arguments":{"edge_id":"edge-b","from":"claim-a","to":"claim-b","relation":"contradicts","source_ids":["paper-a","experiment-b"]}}}')
+out=$(call '{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"add_edge","arguments":{"edge_id":"edge-b","from":"claim-a","to":"claim-b","relation":"contradicts","source_ids":["paper-a","experiment-b"],"evidence":{"benchmark":"omit from bounded context"}}}}')
 printf '%s\n' "$out" | grep 'contradicts' >/dev/null
+
+out=$(call '{"jsonrpc":"2.0","id":82,"method":"tools/call","params":{"name":"add_edge","arguments":{"edge_id":"edge-long","from":"claim-a","to":"claim-long","relation":"related-to","source_ids":["paper-a"]}}}')
+printf '%s\n' "$out" | grep 'edge-long' >/dev/null
 
 out=$(call '{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"rebuild_graph","arguments":{}}}')
 printf '%s\n' "$out" | grep 'preserved_derived_graph' >/dev/null
 
 out=$(call '{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"traverse_graph","arguments":{"node_id":"claim-a"}}}')
 printf '%s\n' "$out" | grep 'SQLite paper' >/dev/null
+printf '%s\n' "$out" | grep 'docs/sqlite.md' >/dev/null
 printf '%s\n' "$out" | grep 'edge-a.*edge-b' >/dev/null
+printf '%s\n' "$out" | grep 'has_evidence.*true' >/dev/null
+if printf '%s\n' "$out" | grep 'benchmark' >/dev/null; then exit 1; fi
 
 out=$(call '{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"traverse_graph","arguments":{"node_id":"claim-a","limit":1}}}')
 printf '%s\n' "$out" | grep 'truncated.*true' >/dev/null

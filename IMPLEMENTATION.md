@@ -17,7 +17,7 @@ The data directory contains JSON Lines files:
 
 Source formats are intentionally open: paths, URLs, Markdown, PDF, papers, meetings, experiments, code, and external specifications are all references. Source `status` and optional `uncertainty` are preserved verbatim. Interpreted claims retain `source_ids`, `claim_status`, and `confidence`; contradictory material is represented with independent nodes and a `contradicts` edge rather than being merged.
 
-Required source metadata cannot be empty, and graph nodes or relations cannot cite a source that is not registered. Every search and traversal result is hard-capped at 20 items and reports whether more matching data was omitted. Search results, rebuilt Source nodes, graph traversal, and exported structure use stable identifier order so bounded context remains repeatable.
+Required source metadata cannot be empty, and graph nodes or relations cannot cite a source that is not registered. Every search and traversal result is hard-capped at 20 items and reports whether more matching data was omitted. Traversal preserves node labels, source references, claim state, confidence, and source-id provenance; descriptions are capped at 512 characters and arbitrary edge Evidence is represented by a presence flag. Search results, rebuilt Source nodes, graph traversal, and exported structure use stable identifier order so bounded context remains repeatable.
 
 ## MCP surface
 
