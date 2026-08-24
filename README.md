@@ -1,5 +1,7 @@
 # OwlKnowledge
 
+[日本語版](README.ja.md)
+
 ## Project overview
 
 OwlKnowledge is a small, standalone MCP server for organizing source references into a navigable knowledge graph. Sources remain durable material, while graph nodes and relations are revisable interpretations.
